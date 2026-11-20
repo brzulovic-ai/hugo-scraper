@@ -1,0 +1,6 @@
+{
+  "name": "URL to Hugo Blog Generator",
+  "description": "Scrape any web page, YouTube video, Instagram Reel, or TikTok video and generate structured Hugo static blog posts with YAML front matter using Google Gemini, Groq, Ollama local models, or a LiteLLM proxy gateway.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
