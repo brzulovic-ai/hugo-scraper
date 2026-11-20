@@ -1,24 +1,24 @@
 # ==========================================
 # 1. Build Stage
 # ==========================================
-FROM node:22-alpine AS builder
+FROM oven/bun:1-alpine AS builder
 
 WORKDIR /app
 
-# Install build dependencies
-COPY package.json ./
-RUN npm install
+# Install build dependencies with Bun (fast, lightweight)
+COPY package.json bun.lock* ./
+RUN bun install --no-cache
 
 # Copy application source code
 COPY . .
 
 # Build Vite frontend and bundled Express server (dist/server.cjs)
-RUN npm run build
+RUN bun run build
 
 # ==========================================
 # 2. Production Runner Stage
 # ==========================================
-FROM node:22-alpine AS runner
+FROM oven/bun:1-alpine AS runner
 
 WORKDIR /app
 
@@ -26,8 +26,8 @@ ENV NODE_ENV=production
 ENV PORT=3000
 
 # Copy package manifests and install production-only dependencies
-COPY package.json ./
-RUN npm install --omit=dev && npm cache clean --force
+COPY package.json bun.lock* ./
+RUN bun install --production --no-cache
 
 # Copy compiled frontend assets & bundled server from builder stage
 COPY --from=builder /app/dist ./dist
@@ -42,5 +42,5 @@ USER nodejs
 
 EXPOSE 3000
 
-# Start compiled server
-CMD ["node", "dist/server.cjs"]
+# Start compiled server with Bun runtime
+CMD ["bun", "dist/server.cjs"]

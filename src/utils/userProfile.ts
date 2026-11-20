@@ -12,6 +12,9 @@ export function loadSavedProfile(): UserSettingsProfile | null {
     if (!raw) return null;
     const parsed = JSON.parse(raw);
     if (parsed && typeof parsed === "object" && parsed.model) {
+      if (parsed.model === "gemini-3.7-flash") {
+        parsed.model = "gemini-flash-lite-latest";
+      }
       return parsed as UserSettingsProfile;
     }
   } catch (err) {
@@ -33,7 +36,7 @@ export function saveUserProfile(options: GenerationOptions): UserSettingsProfile
     customCategories: options.customCategories || "",
     customTags: options.customTags || "",
     provider: (options.provider as "gemini" | "groq" | "ollama" | "litellm") || "gemini",
-    model: options.model || "gemini-3.7-flash",
+    model: options.model || "gemini-flash-lite-latest",
     remoteCapability: options.remoteCapability || "google-free",
     includeTranscript: Boolean(options.includeTranscript),
     ollamaBaseUrl: options.ollamaBaseUrl,

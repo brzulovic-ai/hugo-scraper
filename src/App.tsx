@@ -141,14 +141,26 @@ export default function App() {
     loading: false
   });
   const [customLiteLLMModel, setCustomLiteLLMModel] = useState("");
+  const [customGroqModel, setCustomGroqModel] = useState("");
+  const [useCustomModel, setUseCustomModel] = useState(false);
 
   const [showLiteLLMKey, setShowLiteLLMKey] = useState(false);
   const [showOllamaKey, setShowOllamaKey] = useState(false);
   const [showGroqKey, setShowGroqKey] = useState(false);
 
-  const [groqStatus, setGroqStatus] = useState<{ checked: boolean; hasServerKey: boolean }>({
+  const [groqStatus, setGroqStatus] = useState<{
+    checked: boolean;
+    reachable: boolean;
+    hasServerKey: boolean;
+    models: string[];
+    loading: boolean;
+    error?: string;
+  }>({
     checked: false,
-    hasServerKey: false
+    reachable: false,
+    hasServerKey: false,
+    models: [],
+    loading: false
   });
 
   const [options, setOptions] = useState<GenerationOptions>({
@@ -158,7 +170,7 @@ export default function App() {
     customCategories: "",
     customTags: "",
     provider: "gemini",
-    model: "gemini-3.7-flash",
+    model: "gemini-flash-lite-latest",
     remoteCapability: "google-free",
     includeTranscript: false,
     ollamaBaseUrl: "http://localhost:11434",
@@ -283,15 +295,73 @@ export default function App() {
     }
   }, [options.litellmBaseUrl, options.litellmApiKey, options.model, selectedProvider]);
 
-  // Check Groq status on mount
+  // Scan and detect Groq API status and available live models
+  const checkGroq = useCallback(async (apiKeyVal?: string) => {
+    const apiKey = apiKeyVal !== undefined ? apiKeyVal : (options.groqApiKey || "");
+    setGroqStatus(prev => ({ ...prev, loading: true, error: undefined }));
+    try {
+      const res = await fetch(`/api/groq/status?apiKey=${encodeURIComponent(apiKey)}`);
+      const data = await res.json();
+      const models: string[] = Array.isArray(data.models) ? data.models : [];
+      if (data.reachable) {
+        setGroqStatus({
+          checked: true,
+          reachable: true,
+          hasServerKey: Boolean(data.hasServerKey),
+          models,
+          loading: false
+        });
+        if (models.length > 0 && selectedProvider === "groq") {
+          const currentInList = models.includes(options.model);
+          if (!currentInList && !useCustomModel) {
+            setOptions(prev => ({ ...prev, model: models[0] }));
+          }
+        }
+      } else {
+        setGroqStatus({
+          checked: true,
+          reachable: false,
+          hasServerKey: Boolean(data.hasServerKey),
+          models: [],
+          loading: false,
+          error: data.error || "Unable to scan Groq models"
+        });
+      }
+    } catch (err: any) {
+      setGroqStatus(prev => ({
+        ...prev,
+        checked: true,
+        reachable: false,
+        models: [],
+        loading: false,
+        error: err.message || "Failed to connect to Groq API"
+      }));
+    }
+  }, [options.groqApiKey, options.model, selectedProvider, useCustomModel]);
+
+  // Check Groq status and initial model availability on mount
   useEffect(() => {
     fetch("/api/groq/status")
       .then(res => res.json())
       .then(data => {
-        setGroqStatus({ checked: true, hasServerKey: Boolean(data.hasServerKey) });
+        const models: string[] = Array.isArray(data.models) ? data.models : [];
+        setGroqStatus({
+          checked: true,
+          reachable: Boolean(data.reachable),
+          hasServerKey: Boolean(data.hasServerKey),
+          models,
+          loading: false,
+          error: data.error
+        });
       })
       .catch(() => {
-        setGroqStatus({ checked: true, hasServerKey: false });
+        setGroqStatus({
+          checked: true,
+          reachable: false,
+          hasServerKey: false,
+          models: [],
+          loading: false
+        });
       });
   }, []);
 
@@ -394,11 +464,8 @@ export default function App() {
         const inferredProvider = detectModelProvider(modelParam || "", providerParam || profile?.provider);
         setSelectedProvider(inferredProvider);
 
-        const defaultModelForProvider = 
-          inferredProvider === "litellm" ? "gpt-4o-mini" :
-          inferredProvider === "groq" ? "llama-3.3-70b-versatile" :
-          inferredProvider === "ollama" ? "llama3.2" :
-          "gemini-3.7-flash";
+        const defaultModelForProvider =
+          inferredProvider === "gemini" ? "gemini-flash-lite-latest" : "";
 
         const initialOptions: GenerationOptions = {
           author: authorParam || profile?.author || "Personal Blog",
@@ -642,7 +709,7 @@ export default function App() {
         "Executing remote extraction & bypassing crawler defenses...",
         "Parsing DOM tree nodes & identifying core article body...",
         "Discarding headers, navigation bars, scripts, and promotional widgets...",
-        "Streaming content to Google's Gemini 3.7 Flash engine...",
+        "Streaming content to Google's Gemini Flash-Lite Latest engine...",
         "Structuring Markdown sections, code fences, and quotes...",
         "Synthesizing SEO categories, tags, and YAML front matter...",
         "Validating Hugo static compilation formatting...",
@@ -681,6 +748,10 @@ export default function App() {
   const handleFormSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!url.trim()) return;
+    if (!options.model.trim()) {
+      setError(`Please scan models or enter a custom model ID for ${selectedProvider.toUpperCase()} before generating.`);
+      return;
+    }
     executeScrape(url, options);
   };
 
@@ -936,7 +1007,8 @@ export default function App() {
                       type="button"
                       onClick={() => {
                         setSelectedProvider("gemini");
-                        setOptions(prev => ({ ...prev, provider: "gemini", model: "gemini-3.7-flash" }));
+                        setUseCustomModel(false);
+                        setOptions(prev => ({ ...prev, provider: "gemini", model: "gemini-flash-lite-latest" }));
                       }}
                       className={`py-1.5 px-2 rounded-lg flex items-center justify-center gap-1.5 transition-all ${
                         selectedProvider === "gemini"
@@ -952,7 +1024,16 @@ export default function App() {
                       type="button"
                       onClick={() => {
                         setSelectedProvider("groq");
-                        setOptions(prev => ({ ...prev, provider: "groq", model: "llama-3.3-70b-versatile" }));
+                        setUseCustomModel(false);
+                        setCustomGroqModel("");
+                        setOptions(prev => ({
+                          ...prev,
+                          provider: "groq",
+                          model: groqStatus.models.includes(prev.model) ? prev.model : (groqStatus.models[0] || "")
+                        }));
+                        if (!groqStatus.checked || groqStatus.models.length === 0) {
+                          checkGroq();
+                        }
                       }}
                       className={`py-1.5 px-2 rounded-lg flex items-center justify-center gap-1.5 transition-all ${
                         selectedProvider === "groq"
@@ -969,8 +1050,14 @@ export default function App() {
                       type="button"
                       onClick={() => {
                         setSelectedProvider("ollama");
-                        setOptions(prev => ({ ...prev, provider: "ollama", model: "llama3.2" }));
-                        if (!ollamaStatus.checked) {
+                        setUseCustomModel(false);
+                        setCustomOllamaModel("");
+                        setOptions(prev => ({
+                          ...prev,
+                          provider: "ollama",
+                          model: ollamaStatus.models.includes(prev.model) ? prev.model : (ollamaStatus.models[0] || "")
+                        }));
+                        if (!ollamaStatus.checked || ollamaStatus.models.length === 0) {
                           checkOllama();
                         }
                       }}
@@ -989,8 +1076,14 @@ export default function App() {
                       type="button"
                       onClick={() => {
                         setSelectedProvider("litellm");
-                        setOptions(prev => ({ ...prev, provider: "litellm", model: "gpt-4o-mini" }));
-                        if (!litellmStatus.checked) {
+                        setUseCustomModel(false);
+                        setCustomLiteLLMModel("");
+                        setOptions(prev => ({
+                          ...prev,
+                          provider: "litellm",
+                          model: litellmStatus.models.includes(prev.model) ? prev.model : (litellmStatus.models[0] || "")
+                        }));
+                        if (!litellmStatus.checked || litellmStatus.models.length === 0) {
                           checkLiteLLM();
                         }
                       }}
@@ -1012,8 +1105,8 @@ export default function App() {
                   
                   {/* Dynamic Model Selector based on provider */}
                   <div className="space-y-1">
-                    <label htmlFor="model-select" className="block text-[11px] font-bold text-slate-600 uppercase tracking-wider flex items-center justify-between">
-                      <span className="flex items-center gap-1">
+                    <div className="flex items-center justify-between gap-2">
+                      <label htmlFor="model-select" className="text-[11px] font-bold text-slate-600 uppercase tracking-wider flex items-center gap-1">
                         <Cpu size={11} className={selectedProvider === "gemini" ? "text-indigo-600" : selectedProvider === "groq" ? "text-orange-500" : selectedProvider === "ollama" ? "text-emerald-600" : "text-sky-600"} />
                         <span>
                           {selectedProvider === "gemini" ? "Gemini Model" : 
@@ -1021,8 +1114,47 @@ export default function App() {
                            selectedProvider === "ollama" ? "Ollama Model" : 
                            "LiteLLM Model"}
                         </span>
-                      </span>
-                    </label>
+                      </label>
+
+                      {selectedProvider === "groq" && (
+                        <button
+                          type="button"
+                          onClick={() => checkGroq(options.groqApiKey)}
+                          disabled={groqStatus.loading || loading}
+                          className="text-[10px] font-bold px-2 py-0.5 rounded-md bg-orange-50 hover:bg-orange-100 text-orange-700 border border-orange-200/70 flex items-center gap-1 transition-colors cursor-pointer disabled:opacity-60"
+                          title="Scan available models from Groq API"
+                        >
+                          <RefreshCw size={10} className={groqStatus.loading ? "animate-spin" : ""} />
+                          <span>{groqStatus.loading ? "Scanning..." : "Scan Models"}</span>
+                        </button>
+                      )}
+
+                      {selectedProvider === "ollama" && (
+                        <button
+                          type="button"
+                          onClick={() => checkOllama(options.ollamaBaseUrl, options.ollamaApiKey)}
+                          disabled={ollamaStatus.loading || loading}
+                          className="text-[10px] font-bold px-2 py-0.5 rounded-md bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-200/70 flex items-center gap-1 transition-colors cursor-pointer disabled:opacity-60"
+                          title="Scan locally installed models from Ollama"
+                        >
+                          <RefreshCw size={10} className={ollamaStatus.loading ? "animate-spin" : ""} />
+                          <span>{ollamaStatus.loading ? "Scanning..." : "Scan Models"}</span>
+                        </button>
+                      )}
+
+                      {selectedProvider === "litellm" && (
+                        <button
+                          type="button"
+                          onClick={() => checkLiteLLM(options.litellmBaseUrl, options.litellmApiKey)}
+                          disabled={litellmStatus.loading || loading}
+                          className="text-[10px] font-bold px-2 py-0.5 rounded-md bg-sky-50 hover:bg-sky-100 text-sky-700 border border-sky-200/70 flex items-center gap-1 transition-colors cursor-pointer disabled:opacity-60"
+                          title="Scan model routes from LiteLLM Proxy"
+                        >
+                          <RefreshCw size={10} className={litellmStatus.loading ? "animate-spin" : ""} />
+                          <span>{litellmStatus.loading ? "Scanning..." : "Scan Models"}</span>
+                        </button>
+                      )}
+                    </div>
 
                     {selectedProvider === "gemini" && (
                       <select
@@ -1043,27 +1175,55 @@ export default function App() {
                     {selectedProvider === "groq" && (
                       <select
                         id="model-select"
-                        value={options.model}
-                        onChange={(e) => setOptions({ ...options, model: e.target.value })}
+                        value={useCustomModel ? "__custom__" : (groqStatus.models.includes(options.model) || options.model ? options.model : "")}
+                        onChange={(e) => {
+                          if (e.target.value === "__custom__") {
+                            setUseCustomModel(true);
+                            setCustomGroqModel(options.model || "");
+                          } else {
+                            setUseCustomModel(false);
+                            setCustomGroqModel("");
+                            setOptions({ ...options, model: e.target.value });
+                          }
+                        }}
                         disabled={loading}
                         className="w-full text-xs py-2 px-2.5 rounded-xl border border-slate-200 bg-white font-medium focus:outline-none focus:ring-2 focus:ring-orange-500/20 text-slate-800"
                       >
-                        {SUPPORTED_MODELS.groq.map((m) => (
-                          <option key={m.id} value={m.id}>
-                            {m.name} ({m.tag})
+                        {groqStatus.models.length === 0 && (!options.model || useCustomModel) && (
+                          <option value="">
+                            {groqStatus.loading ? "Scanning Groq models..." : "— Click 'Scan Models' to load —"}
                           </option>
-                        ))}
+                        )}
+                        {options.model && !useCustomModel && !groqStatus.models.includes(options.model) && (
+                          <option value={options.model}>
+                            {options.model} (Current / Saved)
+                          </option>
+                        )}
+                        {groqStatus.models.length > 0 && (
+                          <optgroup label={`Scanned from Groq API (${groqStatus.models.length})`}>
+                            {groqStatus.models.map((mId) => (
+                              <option key={mId} value={mId}>
+                                ⚡ {mId}
+                              </option>
+                            ))}
+                          </optgroup>
+                        )}
+                        <optgroup label="Custom">
+                          <option value="__custom__">✏️ Custom Groq Model ID...</option>
+                        </optgroup>
                       </select>
                     )}
 
                     {selectedProvider === "ollama" && (
                       <select
                         id="model-select"
-                        value={customOllamaModel ? "__custom__" : options.model}
+                        value={useCustomModel ? "__custom__" : (ollamaStatus.models.includes(options.model) || options.model ? options.model : "")}
                         onChange={(e) => {
                           if (e.target.value === "__custom__") {
-                            setCustomOllamaModel(options.model);
+                            setUseCustomModel(true);
+                            setCustomOllamaModel(options.model || "");
                           } else {
+                            setUseCustomModel(false);
                             setCustomOllamaModel("");
                             setOptions({ ...options, model: e.target.value });
                           }
@@ -1071,22 +1231,23 @@ export default function App() {
                         disabled={loading}
                         className="w-full text-xs py-2 px-2.5 rounded-xl border border-slate-200 bg-white font-medium focus:outline-none focus:ring-2 focus:ring-emerald-500/20 text-slate-800"
                       >
-                        <optgroup label="Default Supported Models">
-                          {SUPPORTED_MODELS.ollama.map((m) => (
-                            <option key={m.id} value={m.id}>
-                              {m.name} ({m.tag})
-                            </option>
-                          ))}
-                        </optgroup>
+                        {ollamaStatus.models.length === 0 && (!options.model || useCustomModel) && (
+                          <option value="">
+                            {ollamaStatus.loading ? "Scanning Ollama models..." : "— Click 'Scan Models' to load —"}
+                          </option>
+                        )}
+                        {options.model && !useCustomModel && !ollamaStatus.models.includes(options.model) && (
+                          <option value={options.model}>
+                            {options.model} (Current / Saved)
+                          </option>
+                        )}
                         {ollamaStatus.models.length > 0 && (
-                          <optgroup label="Locally Installed on Your Ollama">
-                            {ollamaStatus.models
-                              .filter((mName) => !SUPPORTED_MODELS.ollama.some((sm) => sm.id === mName))
-                              .map((mName) => (
-                                <option key={mName} value={mName}>
-                                  🦙 {mName} (Local Tag)
-                                </option>
-                              ))}
+                          <optgroup label={`Scanned from Ollama (${ollamaStatus.models.length})`}>
+                            {ollamaStatus.models.map((mName) => (
+                              <option key={mName} value={mName}>
+                                🦙 {mName}
+                              </option>
+                            ))}
                           </optgroup>
                         )}
                         <optgroup label="Custom">
@@ -1098,11 +1259,13 @@ export default function App() {
                     {selectedProvider === "litellm" && (
                       <select
                         id="model-select"
-                        value={customLiteLLMModel ? "__custom__" : options.model}
+                        value={useCustomModel ? "__custom__" : (litellmStatus.models.includes(options.model) || options.model ? options.model : "")}
                         onChange={(e) => {
                           if (e.target.value === "__custom__") {
-                            setCustomLiteLLMModel(options.model);
+                            setUseCustomModel(true);
+                            setCustomLiteLLMModel(options.model || "");
                           } else {
+                            setUseCustomModel(false);
                             setCustomLiteLLMModel("");
                             setOptions({ ...options, model: e.target.value });
                           }
@@ -1110,22 +1273,23 @@ export default function App() {
                         disabled={loading}
                         className="w-full text-xs py-2 px-2.5 rounded-xl border border-slate-200 bg-white font-medium focus:outline-none focus:ring-2 focus:ring-sky-500/20 text-slate-800"
                       >
-                        <optgroup label="Default LiteLLM Routes">
-                          {SUPPORTED_MODELS.litellm.map((m) => (
-                            <option key={m.id} value={m.id}>
-                              {m.name} ({m.tag})
-                            </option>
-                          ))}
-                        </optgroup>
+                        {litellmStatus.models.length === 0 && (!options.model || useCustomModel) && (
+                          <option value="">
+                            {litellmStatus.loading ? "Scanning LiteLLM Proxy..." : "— Click 'Scan Models' to load —"}
+                          </option>
+                        )}
+                        {options.model && !useCustomModel && !litellmStatus.models.includes(options.model) && (
+                          <option value={options.model}>
+                            {options.model} (Current / Saved)
+                          </option>
+                        )}
                         {litellmStatus.models.length > 0 && (
-                          <optgroup label="Discovered from LiteLLM Proxy">
-                            {litellmStatus.models
-                              .filter((mName) => !SUPPORTED_MODELS.litellm.some((sm) => sm.id === mName))
-                              .map((mName) => (
-                                <option key={mName} value={mName}>
-                                  🌐 {mName}
-                                </option>
-                              ))}
+                          <optgroup label={`Scanned from LiteLLM Proxy (${litellmStatus.models.length})`}>
+                            {litellmStatus.models.map((mName) => (
+                              <option key={mName} value={mName}>
+                                🌐 {mName}
+                              </option>
+                            ))}
                           </optgroup>
                         )}
                         <optgroup label="Custom">
@@ -1278,7 +1442,7 @@ export default function App() {
                       </div>
                     </div>
 
-                    {customOllamaModel && (
+                    {useCustomModel && (
                       <div className="pt-1">
                         <label className="block text-[10px] font-bold text-emerald-900 uppercase tracking-wider mb-1">
                           Custom Local Model Tag:
@@ -1342,7 +1506,7 @@ export default function App() {
                           className="px-3 py-1.5 bg-sky-600 hover:bg-sky-700 text-white rounded-lg font-semibold text-xs flex items-center gap-1 shrink-0 transition-colors shadow-2xs cursor-pointer"
                         >
                           <RefreshCw size={12} className={litellmStatus.loading ? "animate-spin" : ""} />
-                          <span>Scan Proxy</span>
+                          <span>Scan Models</span>
                         </button>
                       </div>
 
@@ -1364,7 +1528,7 @@ export default function App() {
                       </div>
                     </div>
 
-                    {customLiteLLMModel && (
+                    {useCustomModel && (
                       <div className="pt-1">
                         <label className="block text-[10px] font-bold text-sky-900 uppercase tracking-wider mb-1">
                           Custom Model Route / Tag:
@@ -1388,34 +1552,79 @@ export default function App() {
                 )}
 
                 {selectedProvider === "groq" && (
-                  <div className="p-3.5 bg-orange-50/50 rounded-xl border border-orange-100 space-y-2 text-xs">
-                    <div className="flex items-center justify-between font-bold text-orange-950">
+                  <div className="p-3.5 bg-orange-50/50 rounded-xl border border-orange-100 space-y-2.5 text-xs">
+                    <div className="flex flex-wrap items-center justify-between gap-2 font-bold text-orange-950">
                       <span className="flex items-center gap-1.5">
                         <Key size={12} className="text-orange-600" />
                         <span>Groq API Key (Free Tier LPU)</span>
                       </span>
-                      {groqStatus.hasServerKey && (
-                        <span className="text-[10px] bg-emerald-100 text-emerald-800 font-semibold px-2 py-0.5 rounded-full flex items-center gap-1">
-                          <CheckCircle2 size={10} /> Server Key Configured
-                        </span>
-                      )}
+                      <div className="flex items-center gap-1.5 text-[11px] font-semibold">
+                        {groqStatus.loading ? (
+                          <span className="text-slate-500 flex items-center gap-1">
+                            <RefreshCw size={11} className="animate-spin" /> Scanning...
+                          </span>
+                        ) : groqStatus.checked && groqStatus.reachable ? (
+                          <span className="bg-emerald-100 text-emerald-800 px-2 py-0.5 rounded-full flex items-center gap-1">
+                            <CheckCircle2 size={10} /> Connected ({groqStatus.models.length} models)
+                          </span>
+                        ) : groqStatus.hasServerKey ? (
+                          <span className="bg-emerald-100 text-emerald-800 px-2 py-0.5 rounded-full flex items-center gap-1">
+                            <CheckCircle2 size={10} /> Server Key Configured
+                          </span>
+                        ) : groqStatus.checked && groqStatus.error ? (
+                          <span className="bg-amber-100 text-amber-800 px-2 py-0.5 rounded-full flex items-center gap-1" title={groqStatus.error}>
+                            <XCircle size={10} /> Key Required / Offline
+                          </span>
+                        ) : null}
+                      </div>
                     </div>
-                    <div className="relative flex items-center">
-                      <input
-                        type={showGroqKey ? "text" : "password"}
-                        value={options.groqApiKey || ""}
-                        onChange={(e) => setOptions({ ...options, groqApiKey: e.target.value })}
-                        placeholder={groqStatus.hasServerKey ? "Using server GROQ_API_KEY (optional override)" : "Paste Groq API Key (gsk_...)"}
-                        className="w-full text-xs pl-2.5 pr-8 py-1.5 rounded-lg border border-orange-200 bg-white font-mono text-slate-800 focus:outline-none focus:ring-1 focus:ring-orange-500"
-                      />
+
+                    <div className="flex items-center gap-2">
+                      <div className="relative flex-1 flex items-center">
+                        <input
+                          type={showGroqKey ? "text" : "password"}
+                          value={options.groqApiKey || ""}
+                          onChange={(e) => setOptions({ ...options, groqApiKey: e.target.value })}
+                          placeholder={groqStatus.hasServerKey ? "Using server GROQ_API_KEY (optional override)" : "Paste Groq API Key (gsk_...)"}
+                          className="w-full text-xs pl-2.5 pr-8 py-1.5 rounded-lg border border-orange-200 bg-white font-mono text-slate-800 focus:outline-none focus:ring-1 focus:ring-orange-500"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => setShowGroqKey(!showGroqKey)}
+                          className="absolute right-2 text-slate-400 hover:text-slate-600"
+                        >
+                          {showGroqKey ? <EyeOff size={13} /> : <Eye size={13} />}
+                        </button>
+                      </div>
                       <button
                         type="button"
-                        onClick={() => setShowGroqKey(!showGroqKey)}
-                        className="absolute right-2 text-slate-400 hover:text-slate-600"
+                        onClick={() => checkGroq(options.groqApiKey)}
+                        disabled={groqStatus.loading}
+                        className="px-3 py-1.5 bg-orange-600 hover:bg-orange-700 text-white rounded-lg font-semibold text-xs flex items-center gap-1 shrink-0 transition-colors shadow-2xs cursor-pointer disabled:opacity-60"
                       >
-                        {showGroqKey ? <EyeOff size={13} /> : <Eye size={13} />}
+                        <RefreshCw size={12} className={groqStatus.loading ? "animate-spin" : ""} />
+                        <span>Scan Models</span>
                       </button>
                     </div>
+
+                    {useCustomModel && (
+                      <div className="pt-1">
+                        <label className="block text-[10px] font-bold text-orange-950 uppercase tracking-wider mb-1">
+                          Custom Groq Model ID:
+                        </label>
+                        <input
+                          type="text"
+                          value={customGroqModel}
+                          onChange={(e) => {
+                            setCustomGroqModel(e.target.value);
+                            setOptions({ ...options, model: e.target.value });
+                          }}
+                          placeholder="e.g. llama-3.3-70b-versatile, llama-3.1-8b-instant"
+                          className="w-full text-xs px-2.5 py-1.5 rounded-lg border border-orange-200 bg-white font-mono text-slate-800 focus:outline-none"
+                        />
+                      </div>
+                    )}
+
                     <p className="text-[11px] text-orange-800/80 leading-normal">
                       Get a free Groq API key with fast LPU inference at{" "}
                       <a
@@ -1649,10 +1858,15 @@ export default function App() {
                 </AnimatePresence>
 
                 {/* Scrape Action trigger */}
+                {selectedProvider !== "gemini" && !options.model.trim() && (
+                  <p className="text-[11px] font-medium text-amber-700 bg-amber-50 border border-amber-200/70 rounded-lg px-3 py-1.5">
+                    No {selectedProvider.toUpperCase()} model selected yet. Click <strong>Scan Models</strong> or choose Custom Model above.
+                  </p>
+                )}
                 <button
                   type="submit"
-                  disabled={loading || !url.trim()}
-                  className="w-full py-3 bg-indigo-600 hover:bg-indigo-700 text-white disabled:bg-indigo-400 font-semibold rounded-xl shadow-md shadow-indigo-600/10 hover:shadow-indigo-600/20 active:scale-[0.99] transition-all flex items-center justify-center gap-2 text-sm cursor-pointer"
+                  disabled={loading || !url.trim() || !options.model.trim()}
+                  className="w-full py-3 bg-indigo-600 hover:bg-indigo-700 text-white disabled:bg-indigo-400 font-semibold rounded-xl shadow-md shadow-indigo-600/10 hover:shadow-indigo-600/20 active:scale-[0.99] transition-all flex items-center justify-center gap-2 text-sm cursor-pointer disabled:cursor-not-allowed"
                 >
                   {loading ? (
                     <>

@@ -15,7 +15,7 @@ A modern, full-stack application that transforms any online documentation, tutor
   - Extracts and decodes timestamped caption/subtitle tracks from the video player.
   - Generates Hugo YouTube shortcodes `{{< youtube VIDEO_ID >}}`, timestamped key moment breakdowns, code recreation, and an interactive video transcript viewer.
 - **🧠 Google Gemini AI Synthesis**:
-  - Default: **`gemini-3.7-flash`** (Google's latest free-tier flagship).
+  - Default: **`gemini-flash-lite-latest`** (auto-updating lightweight Gemini Flash-Lite free-tier model).
   - Alternative options: **`gemini-3.1-flash-lite`** (low-latency) and **`gemini-flash-latest`** (auto-updating).
   - **High-Demand Resiliency**: Automatic exponential backoff and cascading model fallback when encountering 503/429 spikes.
 - **📝 Hugo Front Matter Automation**:
@@ -143,7 +143,7 @@ You can trigger the scraper programmatically by passing query parameters in the 
 | `tone` | string | `technical` | Content tone (`technical`, `beginner`, `concise`, `in-depth`) |
 | `author` | string | `Personal Blog` | Author name for Hugo YAML front matter |
 | `lang` | string | `English` | Target language for the output |
-| `model` | string | `gemini-3.7-flash` | Gemini model (`gemini-3.7-flash`, `gemini-3.1-flash-lite`, `gemini-flash-latest`) |
+| `model` | string | `gemini-flash-lite-latest` | Gemini model (`gemini-flash-lite-latest`, `gemini-3.1-flash-lite`, `gemini-flash-latest`) |
 | `categories` | string | `""` | Comma-separated categories |
 | `tags` | string | `""` | Comma-separated tags |
 

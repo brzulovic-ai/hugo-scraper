@@ -19,8 +19,8 @@ describe("Hugo Utility & Helper Tests", () => {
   describe("ensureModelTag", () => {
     it("adds model name as a tag if not present", () => {
       const tags = ["technology", "hugo"];
-      const updated = ensureModelTag(tags, "gemini-3.7-flash");
-      expect(updated).toEqual(["technology", "hugo", "gemini-3.7-flash"]);
+      const updated = ensureModelTag(tags, "gemini-flash-lite-latest");
+      expect(updated).toEqual(["technology", "hugo", "gemini-flash-lite-latest"]);
     });
 
     it("does not duplicate tag if already present", () => {
@@ -169,7 +169,7 @@ describe("Hugo Utility & Helper Tests", () => {
         tags: ["GCP", "Containers", "Docker"],
         slug: "deploying-to-cloud-run",
         originalUrl: "https://cloud.google.com/run",
-        model_used: "gemini-3.7-flash",
+        model_used: "gemini-flash-lite-latest",
         provider_used: "gemini",
       });
 
@@ -177,7 +177,7 @@ describe("Hugo Utility & Helper Tests", () => {
       expect(frontMatter).toContain('author: "DevOps Engineer"');
       expect(frontMatter).toContain('slug: "deploying-to-cloud-run"');
       expect(frontMatter).toContain('source_url: "https://cloud.google.com/run"');
-      expect(frontMatter).toContain('model_used: "gemini-3.7-flash"');
+      expect(frontMatter).toContain('model_used: "gemini-flash-lite-latest"');
       expect(frontMatter).toContain('provider_used: "gemini"');
       expect(frontMatter).toContain('- "Cloud"');
       expect(frontMatter).toContain('- "Docker"');
@@ -213,14 +213,14 @@ describe("Hugo Utility & Helper Tests", () => {
 
   describe("parseQueryParameters", () => {
     it("parses URL and automatic trigger parameters (?url=...&proceed=1)", () => {
-      const query = "?url=https%3A%2F%2Fgohugo.io&proceed=1&author=Admin&lang=French&model=gemini-3.7-flash";
+      const query = "?url=https%3A%2F%2Fgohugo.io&proceed=1&author=Admin&lang=French&model=gemini-flash-lite-latest";
       const result = parseQueryParameters(query);
 
       expect(result.url).toBe("https://gohugo.io");
       expect(result.proceed).toBe(true);
       expect(result.options.author).toBe("Admin");
       expect(result.options.language).toBe("French");
-      expect(result.options.model).toBe("gemini-3.7-flash");
+      expect(result.options.model).toBe("gemini-flash-lite-latest");
     });
 
     it("disables automatic proceed when proceed is absent or false", () => {

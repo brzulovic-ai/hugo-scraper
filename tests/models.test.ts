@@ -9,42 +9,21 @@ describe("Model Configuration & Provider Selection", () => {
   describe("Supported Models Catalog", () => {
     it("contains Gemini free-tier models", () => {
       const geminiIds = SUPPORTED_MODELS.gemini.map((m) => m.id);
-      expect(geminiIds).toContain("gemini-3.7-flash");
+      expect(geminiIds).toContain("gemini-flash-lite-latest");
       expect(geminiIds).toContain("gemini-3.1-flash-lite");
       expect(geminiIds).toContain("gemini-flash-latest");
     });
 
-    it("contains Groq ultra-fast free models", () => {
-      const groqIds = SUPPORTED_MODELS.groq.map((m) => m.id);
-      expect(groqIds).toContain("llama-3.3-70b-versatile");
-      expect(groqIds).toContain("llama-3.1-8b-instant");
-      expect(groqIds).toContain("mixtral-8x7b-32768");
-      expect(groqIds).toContain("gemma2-9b-it");
-      expect(groqIds).toContain("deepseek-r1-distill-llama-70b");
-    });
-
-    it("contains Ollama local models", () => {
-      const ollamaIds = SUPPORTED_MODELS.ollama.map((m) => m.id);
-      expect(ollamaIds).toContain("llama3.2");
-      expect(ollamaIds).toContain("llama3.1");
-      expect(ollamaIds).toContain("mistral");
-      expect(ollamaIds).toContain("deepseek-r1");
-      expect(ollamaIds).toContain("phi4");
-      expect(ollamaIds).toContain("qwen2.5-coder");
-    });
-
-    it("contains LiteLLM proxy default models", () => {
-      const litellmIds = SUPPORTED_MODELS.litellm.map((m) => m.id);
-      expect(litellmIds).toContain("gpt-4o-mini");
-      expect(litellmIds).toContain("claude-3-5-haiku");
-      expect(litellmIds).toContain("mistral-small");
-      expect(litellmIds).toContain("anthropic/claude-3-7-sonnet");
+    it("keeps Groq, Ollama, and LiteLLM static model lists empty for live scanning", () => {
+      expect(SUPPORTED_MODELS.groq).toEqual([]);
+      expect(SUPPORTED_MODELS.ollama).toEqual([]);
+      expect(SUPPORTED_MODELS.litellm).toEqual([]);
     });
   });
 
   describe("detectModelProvider", () => {
     it("detects gemini models correctly", () => {
-      expect(detectModelProvider("gemini-3.7-flash")).toBe("gemini");
+      expect(detectModelProvider("gemini-flash-lite-latest")).toBe("gemini");
       expect(detectModelProvider("gemini-3.1-flash-lite")).toBe("gemini");
     });
 

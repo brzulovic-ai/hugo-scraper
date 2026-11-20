@@ -770,7 +770,10 @@ async function generateWithGroq(params: {
     );
   }
 
-  const targetModel = model || "llama-3.3-70b-versatile";
+  const targetModel = (model || "").trim();
+  if (!targetModel) {
+    throw new Error("No Groq model selected. Please scan Groq models or specify a model ID.");
+  }
   console.log(`[Groq] Calling Groq model ${targetModel}...`);
 
   const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
@@ -837,7 +840,10 @@ async function generateWithOllama(params: {
     headers["Authorization"] = `Bearer ${effectiveApiKey}`;
   }
 
-  const targetModel = model || "llama3.2";
+  const targetModel = (model || "").trim();
+  if (!targetModel) {
+    throw new Error("No Ollama model selected. Please scan Ollama models or specify a model tag.");
+  }
   console.log(`[Ollama] Calling Ollama model ${targetModel} at ${targetBaseUrl}...`);
 
   // 1. Try native Ollama /api/chat with format: "json"
@@ -928,7 +934,10 @@ async function generateWithLiteLLM(params: {
   targetBaseUrl = targetBaseUrl.replace(/\/+$/, "");
 
   const effectiveApiKey = (apiKey || process.env.LITELLM_API_KEY || "").trim();
-  const targetModel = model || "gpt-4o-mini";
+  const targetModel = (model || "").trim();
+  if (!targetModel) {
+    throw new Error("No LiteLLM model selected. Please scan LiteLLM proxy models or specify a model route.");
+  }
   console.log(`[LiteLLM] Calling LiteLLM Proxy model '${targetModel}' at ${targetBaseUrl}...`);
 
   const headers: Record<string, string> = {
@@ -1147,7 +1156,7 @@ async function executeModelCompletion(params: {
     systemInstruction,
     userPrompt,
     provider,
-    model = "gemini-3.7-flash",
+    model = "gemini-flash-lite-latest",
     ollamaBaseUrl,
     ollamaApiKey,
     groqApiKey,
@@ -1221,8 +1230,8 @@ async function executeModelCompletion(params: {
   } else {
     // Gemini with fallback
     const ai = getAiClient();
-    const validModels = ["gemini-3.7-flash", "gemini-3.1-flash-lite", "gemini-flash-latest"];
-    const targetModel = validModels.includes(model) ? model : "gemini-3.7-flash";
+    const validModels = ["gemini-flash-lite-latest", "gemini-3.1-flash-lite", "gemini-flash-latest"];
+    const targetModel = validModels.includes(model) ? model : "gemini-flash-lite-latest";
 
     const generateConfig = {
       contents: userPrompt,
@@ -1274,9 +1283,9 @@ async function executeModelCompletion(params: {
 
     const candidateModels = [
       targetModel,
-      "gemini-flash-latest",
-      "gemini-3.7-flash",
-      "gemini-3.1-flash-lite"
+      "gemini-flash-lite-latest",
+      "gemini-3.1-flash-lite",
+      "gemini-flash-latest"
     ].filter((m, idx, self) => Boolean(m) && self.indexOf(m) === idx);
 
     let resultText = "";
@@ -1368,7 +1377,7 @@ async function handleScrapeAndGenerate(params: {
     customCategories, 
     customTags,
     provider,
-    model = "gemini-3.7-flash",
+    model = "gemini-flash-lite-latest",
     remoteCapability = "google-free",
     includeTranscript = false,
     ollamaBaseUrl,
@@ -1777,7 +1786,7 @@ ${post.markdownContent || post.hugoFullFile}
     systemInstruction,
     userPrompt,
     provider: provider || post.providerUsed,
-    model: model || post.modelUsed || "gemini-3.7-flash",
+    model: model || post.modelUsed || "gemini-flash-lite-latest",
     ollamaBaseUrl,
     ollamaApiKey,
     groqApiKey,
@@ -1946,7 +1955,10 @@ app.get("/api/ollama/status", async (req, res) => {
     });
     if (tagsRes.ok) {
       const data: any = await tagsRes.json();
-      const models = Array.isArray(data.models) ? data.models.map((m: any) => m.name) : [];
+      const rawModels: string[] = Array.isArray(data.models)
+        ? data.models.map((m: any) => String(m?.name || m?.model || "").trim()).filter(Boolean)
+        : [];
+      const models = Array.from(new Set<string>(rawModels)).sort((a, b) => a.localeCompare(b));
       return res.json({
         success: true,
         reachable: true,
@@ -2014,14 +2026,16 @@ app.get("/api/litellm/status", async (req, res) => {
         models = data.map((m: any) => m.id || m.name || String(m)).filter(Boolean);
       }
 
+      const deduplicatedModels = Array.from(new Set<string>(models)).sort((a, b) => a.localeCompare(b));
+
       return res.json({
         success: true,
         reachable: true,
         endpoint,
         hasServerKey,
         hasProvidedKey: Boolean(apiKey),
-        modelsCount: models.length,
-        models
+        modelsCount: deduplicatedModels.length,
+        models: deduplicatedModels
       });
     }
 
@@ -2045,13 +2059,74 @@ app.get("/api/litellm/status", async (req, res) => {
   }
 });
 
-// Check Groq status (verify key configured on server)
-app.get("/api/groq/status", (req, res) => {
-  const isKeyConfigured = Boolean(process.env.GROQ_API_KEY && process.env.GROQ_API_KEY !== "MY_GROQ_API_KEY");
-  res.json({
-    success: true,
-    hasServerKey: isKeyConfigured
-  });
+// Check Groq status and scan live models from Groq API
+app.get("/api/groq/status", async (req, res) => {
+  const userApiKey = ((req.query.apiKey as string) || "").trim();
+  const hasServerKey = Boolean(process.env.GROQ_API_KEY && process.env.GROQ_API_KEY !== "MY_GROQ_API_KEY");
+  const effectiveApiKey = userApiKey || (hasServerKey ? (process.env.GROQ_API_KEY as string) : "");
+
+  if (!effectiveApiKey) {
+    return res.json({
+      success: true,
+      reachable: false,
+      hasServerKey,
+      hasProvidedKey: false,
+      modelsCount: 0,
+      models: [],
+      error: "GROQ_API_KEY is not configured or provided"
+    });
+  }
+
+  try {
+    const modelsRes = await fetch("https://api.groq.com/openai/v1/models", {
+      headers: {
+        "Authorization": `Bearer ${effectiveApiKey}`,
+        "User-Agent": "aistudio-hugo-builder"
+      },
+      signal: AbortSignal.timeout(5000)
+    });
+
+    if (modelsRes.ok) {
+      const data: any = await modelsRes.json();
+      const rawModels: string[] = Array.isArray(data.data)
+        ? data.data
+            .filter((m: any) => m && m.active !== false && typeof m.id === "string")
+            .map((m: any) => m.id.trim())
+            .filter(Boolean)
+        : [];
+      const models = Array.from(new Set<string>(rawModels)).sort((a, b) => a.localeCompare(b));
+
+      return res.json({
+        success: true,
+        reachable: true,
+        hasServerKey,
+        hasProvidedKey: Boolean(userApiKey),
+        modelsCount: models.length,
+        models
+      });
+    }
+
+    const errText = await modelsRes.text().catch(() => "");
+    return res.json({
+      success: true,
+      reachable: false,
+      hasServerKey,
+      hasProvidedKey: Boolean(userApiKey),
+      modelsCount: 0,
+      models: [],
+      error: `Groq API returned status ${modelsRes.status}${errText ? `: ${errText.slice(0, 140)}` : ""}`
+    });
+  } catch (err: any) {
+    return res.json({
+      success: true,
+      reachable: false,
+      hasServerKey,
+      hasProvidedKey: Boolean(userApiKey),
+      modelsCount: 0,
+      models: [],
+      error: err.message || "Failed to connect to Groq API"
+    });
+  }
 });
 
 // REST API endpoint to list all generated posts stored in the volume
